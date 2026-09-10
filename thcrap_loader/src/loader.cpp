@@ -37,9 +37,10 @@ const char* game_lookup(const json_t *games_js, const char *game, const char *ba
 	const char *game_path_str = json_string_value(game_path);
 	if (PathIsRelativeA(game_path_str)) {
 		size_t base_dir_length = strlen(base_dir);
-		char* ret = (char*)malloc(base_dir_length + strlen(game_path_str) + 1);
+		size_t game_path_length = strlen(game_path_str);
+		char* ret = (char*)malloc(base_dir_length + game_path_length + 1);
 		memcpy(ret, base_dir, base_dir_length);
-		PathAppendA(ret, game_path_str);
+		memcpy(ret + base_dir_length, game_path_str, game_path_length + 1);
 		return ret;
 	}
 	return game_path_str;
@@ -258,6 +259,65 @@ int TH_CDECL win32_utf8_main(int argc, const char *argv[])
 		}
 		ret = -3;
 		goto end;
+	}
+
+	switch (GetExeBits(final_exe_fn)) {
+		case -1: // Path does not exist
+			log_mboxf(NULL, MB_OK | MB_ICONEXCLAMATION,
+				"The target path does not exist.\n"
+				"\"%s\"\n"
+				, final_exe_fn
+			);
+			ret = -7;
+			goto end;
+		default: // failed to LoadLibrary
+			log_mboxf(NULL, MB_OK | MB_ICONEXCLAMATION,
+				"Could not identify architecture of target executable.\n"
+				"\"%s\"\n"
+				, final_exe_fn
+			);
+			ret = -6;
+			goto end;
+		case ALT_ARCH_BITS: {
+#if !TH_X64
+			if unexpected(!OS_is_wow64()) {
+				log_mboxf(NULL, MB_OK | MB_ICONEXCLAMATION,
+					"Cannot run a 64 bit executable on a 32 bit OS.\n"
+					"\"%s\"\n"
+					, final_exe_fn
+				);
+				ret = -8;
+				goto end;
+			}
+#endif
+			log_print("Swapping to thcrap_loader" ALT_FILE_SUFFIX ".exe\n");
+			wchar_t* args = GetCommandLineW();
+			if (args[0] == L'"') {
+				while (*++args != L'"' || args[-1] == L'\\');
+				++args;
+			} else {
+				while (*++args != L' ');
+			}
+			++args;
+			BUILD_VLA_STR(wchar_t, new_args, L"bin/thcrap_loader" ALT_FILE_SUFFIX_W L".exe", L" ", args);
+			STARTUPINFOW si = {};
+			PROCESS_INFORMATION pi = {};
+			BOOL success = CreateProcessW(L"bin/thcrap_loader" ALT_FILE_SUFFIX_W L".exe", new_args, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+			VLA_FREE(new_args);
+			if unexpected(!success) {
+				ret = -5;
+				goto end;
+			}
+			CloseHandle(pi.hThread);
+			WaitForSingleObject(pi.hProcess, INFINITE);
+			DWORD exit_code;
+			GetExitCodeProcess(pi.hProcess, &exit_code);
+			CloseHandle(pi.hProcess);
+			ret = exit_code;
+			goto end;
+		}
+		case CURRENT_ARCH_BITS:
+			break;
 	}
 
 	runconfig_load(run_cfg, RUNCONFIG_NO_BINHACKS);

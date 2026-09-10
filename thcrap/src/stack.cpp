@@ -263,6 +263,8 @@ struct MissingPatchData {
 	{}
 };
 
+#define CHECK_DEPENDENCIES 1
+
 void stack_show_missing(void)
 {
 	std::vector<MissingPatchData> missing_patches;
@@ -272,13 +274,16 @@ void stack_show_missing(void)
 			if (!PathFileExistsU(path)) {
 				missing_patches.emplace_back(patch.archive, patch.archive_length);
 			}
+#if CHECK_DEPENDENCIES
 			else if (const patch_desc_t* dependencies = patch.dependencies) {
 				for (
 					const char* dep_id;
 					(dep_id = dependencies->patch_id);
 					++dependencies
 				) {
-					if (std::none_of(stack.cbegin(), stack.cend(), [=](const patch_t& patch) {
+					if (// exlcude missing base patches, this is common when a config is edited
+						strncmp(dep_id, "base_", 5) != 0 &&
+						std::none_of(stack.cbegin(), stack.cend(), [=](const patch_t& patch) {
 						if (const char* patch_id = patch.id) {
 							return !strcmp(patch_id, dep_id);
 						}
@@ -288,6 +293,7 @@ void stack_show_missing(void)
 					}
 				}
 			}
+#endif
 		}
 	}
 
