@@ -218,7 +218,7 @@ public:
     {
         return this->obj;
     }
-    operator bool()
+    operator bool() const
     {
         return this->obj != nullptr;
     }

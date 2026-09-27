@@ -104,7 +104,7 @@ struct CPUID_Data_t {
 		bool HasAVX2 = false;
 		bool FDP_EXCPTN_ONLY = false;
 		bool HasBMI2 = false;
-		bool HasERMS = false;
+		bool HasERMS = false; // enhanced REP MOVSB/REP STOSB
 		bool HasTSXRTM = false;
 		bool FCS_FDS_DEP = false;
 		bool HasMPX = false;
@@ -139,7 +139,7 @@ struct CPUID_Data_t {
 		bool HasMOVDIR64B = false;
 		bool HasAVX5124VNNIW = false;
 		bool HasAVX5124FMAPS = false;
-		bool HasFSRM = false;
+		bool HasFSRM = false; // fast short REP MOVSB
 		bool HasUINTR = false;
 		bool HasAVX512VP2I = false;
 		bool HasSERIALIZE = false;
@@ -155,11 +155,14 @@ struct CPUID_Data_t {
 		bool HasAVXVNNI = false;
 		bool HasAVX512BF16 = false;
 		bool HasCMPCCXADD = false;
-		bool HasFRMB0 = false;
-		bool HasFRSB = false;
-		bool HasFRCSB = false;
+		bool HasFRMB0 = false; // fast zero length REP MOVSB
+		bool HasFRSB = false; // fast short REP STOSB
+		bool HasFRCSB = false; // fast REP CMPSB
+		bool HasFRSCB = false; // fast REP SCASB
 		bool HasAMXFP16 = false;
 		bool HasAVXIFMA = false;
+		bool HasMOVRS = false;
+		bool HasACE = false;
 		bool HasAVXVNNIINT8 = false;
 		bool HasAVXNECONVERT = false;
 		bool HasAMXCOMPLEX = false;
@@ -168,6 +171,8 @@ struct CPUID_Data_t {
 		bool HasAPXF = false;
 		bool HasXSAVEOPT = false;
 		bool HasXSAVEC = false;
+		bool HasAVX101AUX = false;
+		bool HasAVX102AUX = false;
 		bool HasSYSCALL = false;
 		bool HasMMXEXT = false;
 		bool HasRDTSCP = false;
@@ -187,6 +192,7 @@ struct CPUID_Data_t {
 		bool HasRDPRU = false;
 		bool HasMCOMMIT = false;
 		bool HasLWPVAL = false;
+		bool HasAVX512BMM = false;
 		bool HasMVEX = false;
 	};
 	CPUID_Data_t(void) {
@@ -238,7 +244,7 @@ struct CPUID_Data_t {
 		const uint32_t& data2 = data[2]; // ECX
 		const uint32_t& data3 = data[3]; // EDX
 		switch (data[0]) {
-			default: //case 13:
+			default: // case 13:
 				__cpuidex(data, 13, 0);
 				xsave_mask_low = data[0];
 				xsave_mask_high = data[3];
@@ -283,6 +289,7 @@ struct CPUID_Data_t {
 				HasAVX512VNNI		= bittest32(data[2], 11);
 				HasAVX512BITALG		= bittest32(data[2], 12);
 				HasAVX512VPOPCNTDQ	= bittest32(data[2], 14);
+				// Fast zero memory? Is this is a STOS thing?
 				HasRDPID			= bittest32(data[2], 22);
 				HasCLDEMOTE			= bittest32(data[2], 25);
 				HasMOVDIRI			= bittest32(data[2], 27);
@@ -311,9 +318,11 @@ struct CPUID_Data_t {
 						HasCMPCCXADD	= bittest32(data[0], 7);
 						HasFRMB0		= bittest32(data[0], 10);
 						HasFRSB			= bittest32(data[0], 11);
-						HasFRCSB		= bittest32(data[0], 12);
+						HasFRCSB = HasFRSCB = bittest32(data[0], 12);
 						HasAMXFP16		= bittest32(data[0], 21);
 						HasAVXIFMA		= bittest32(data[0], 23);
+						HasMOVRS		= bittest32(data[0], 31);
+						HasACE			= bittest32(data[2], 11);
 						HasAVXVNNIINT8	= bittest32(data[3], 4);
 						HasAVXNECONVERT	= bittest32(data[3], 5);
 						HasAMXCOMPLEX	= bittest32(data[3], 8);
@@ -326,6 +335,9 @@ struct CPUID_Data_t {
 							vector_width = bittest32(data[2], 18) ? VECW_512 :
 										   bittest32(data[2], 17) ? VECW_256 :
 										   VECW_128;
+							__cpuidex(data, 36, 1);
+							HasAVX101AUX = bittest32(data[2], 2);
+							HasAVX102AUX = bittest32(data[2], 3);
 						}
 					case 0:;
 				}
@@ -342,6 +354,10 @@ struct CPUID_Data_t {
 							__cpuid(data, 0x80000021);
 							HasFRSB			|= bittest32(data[0], 10);
 							HasFRCSB		|= bittest32(data[0], 11);
+							HasERMS			|= bittest32(data[0], 15);
+							HasFRSCB		|= bittest32(data[0], 19);
+							HasPREFETCHI	|= bittest32(data[0], 21);
+							HasAVX512BMM	|= bittest32(data[0], 23);
 						case 0x80000020: case 0x8000001F: case 0x8000001E: case 0x8000001D: case 0x8000001C:
 							__cpuid(data, 0x8000001C);
 							HasLWPVAL		= bittest32(data[0], 1);
@@ -401,7 +417,7 @@ struct CPUID_Data_t {
 
 				// Fast system call/return compatibility table.
 				// This isn't really *important* to anything that thcrap does,
-				// but the shear inconsistency of it is laughable enough to document.
+				// but the sheer inconsistency of it is laughable enough to document.
 				//          | Legacy Modes                            | Long Modes
 				//          | Real Mode | v8086 Mode | Protected Mode | Compatibility Mode | 64 Bit Mode
 				// SYSENTER |           | Intel, AMD | Intel, AMD     | Intel              | Intel
@@ -1285,6 +1301,9 @@ static TH_NOINLINE size_t GetCPUFeatureTest(const char* name, size_t name_length
 			else if (strnicmp(name, "prefetchw", name_length) == 0) return CPUID_Data.HasPREFETCHW;
 			else if (strnicmp(name, "prefetchi", name_length) == 0) return CPUID_Data.HasPREFETCHI;
 			else if (strnicmp(name, "serialize", name_length) == 0) return CPUID_Data.HasSERIALIZE;
+			else if (strnicmp(name, "avx512bmm", name_length) == 0) return CPUID_Data.HasAVX512BMM;
+			else if (strnicmp(name, "avx101aux", name_length) == 0) return CPUID_Data.HasAVX101AUX;
+			else if (strnicmp(name, "avx102aux", name_length) == 0) return CPUID_Data.HasAVX102AUX;
 			else	goto InvalidCPUFeatureError;
 			break;
 		case 8:
@@ -1349,9 +1368,11 @@ static TH_NOINLINE size_t GetCPUFeatureTest(const char* name, size_t name_length
 			else if (strnicmp(name, "xsave", name_length) == 0) return CPUID_Data.HasXSAVE;
 			else if (strnicmp(name, "shstk", name_length) == 0) return CPUID_Data.HasSHSTK;
 			else if (strnicmp(name, "model", name_length) == 0) return CPUID_Data.FamilyData.raw;
+			else if (strnicmp(name, "movrs", name_length) == 0) return CPUID_Data.HasMOVRS;
 			else if (strnicmp(name, "3dnow", name_length) == 0) return CPUID_Data.Has3DNOW;
-			else if (strnicmp(name, "frmb0", name_length) == 0) return CPUID_Data.HasFRMB0;
-			else if (strnicmp(name, "frcsb", name_length) == 0) return CPUID_Data.HasFRCSB;
+			else if (strnicmp(name, "frmb0", name_length) == 0) return CPUID_Data.HasFRMB0; // fast zero length REP MOVSB
+			else if (strnicmp(name, "frcsb", name_length) == 0) return CPUID_Data.HasFRCSB; // fast REP CMPSB
+			else if (strnicmp(name, "frscb", name_length) == 0) return CPUID_Data.HasFRSCB; // fast REP SCASB
 #if !TH_X64
 			else if (strnicmp(name, "win64", name_length) == 0) return CPUID_Data.OSIsWow64;
 #else
@@ -1375,9 +1396,9 @@ static TH_NOINLINE size_t GetCPUFeatureTest(const char* name, size_t name_length
 			else if (strnicmp(name, "sse2", name_length) == 0) return CPUID_Data.HasSSE2;
 			else if (strnicmp(name, "f16c", name_length) == 0) return CPUID_Data.HasF16C;
 			else if (strnicmp(name, "gfni", name_length) == 0) return CPUID_Data.HasGFNI;
-			else if (strnicmp(name, "erms", name_length) == 0) return CPUID_Data.HasERMS;
-			else if (strnicmp(name, "fsrm", name_length) == 0) return CPUID_Data.HasFSRM;
-			else if (strnicmp(name, "frsb", name_length) == 0) return CPUID_Data.HasFRSB;
+			else if (strnicmp(name, "erms", name_length) == 0) return CPUID_Data.HasERMS; // enhanced REP MOVSB/REP STOSB
+			else if (strnicmp(name, "fsrm", name_length) == 0) return CPUID_Data.HasFSRM; // fast short REP MOVSB
+			else if (strnicmp(name, "frsb", name_length) == 0) return CPUID_Data.HasFRSB; // fast short REP STOSB
 			else if (strnicmp(name, "clwb", name_length) == 0) return CPUID_Data.HasCLWB;
 			else if (strnicmp(name, "mvex", name_length) == 0) return CPUID_Data.HasMVEX;
 			// A build compiled without SSE could theoretically run on PC98 hardware, so why not?
@@ -1398,6 +1419,7 @@ static TH_NOINLINE size_t GetCPUFeatureTest(const char* name, size_t name_length
 			else if (strnicmp(name, "abm", name_length) == 0) return CPUID_Data.HasABM;
 			else if (strnicmp(name, "xop", name_length) == 0) return CPUID_Data.HasXOP;
 			else if (strnicmp(name, "tbm", name_length) == 0) return CPUID_Data.HasTBM;
+			else if (strnicmp(name, "ace", name_length) == 0) return CPUID_Data.HasACE;
 			else if (strnicmp(name, "sse", name_length) == 0) return CPUID_Data.HasSSE;
 			else if (strnicmp(name, "mmx", name_length) == 0) return CPUID_Data.HasMMX;
 			else if (strnicmp(name, "sm3", name_length) == 0) return CPUID_Data.HasSM3;

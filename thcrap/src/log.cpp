@@ -567,7 +567,7 @@ void log_exit(void) {
 
 bool BP_log(x86_reg_t* regs, json_t* bp_info) {
 	const char* format = json_object_get_string(bp_info, "format");
-	if TH_UNLIKELY(!format) {
+	if UNEXPECTED(!format) {
 		return true;
 	}
 
