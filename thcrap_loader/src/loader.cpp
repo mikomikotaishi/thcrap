@@ -35,7 +35,7 @@ const char* game_lookup(const json_t *games_js, const char *game, const char *ba
 		return nullptr;
 	}
 	const char *game_path_str = json_string_value(game_path);
-	if (PathIsRelativeA(game_path_str)) {
+	if (PathIsRelativeA(game_path_str + (game_path_str[0] == '"'))) {
 		size_t base_dir_length = strlen(base_dir);
 		size_t game_path_length = strlen(game_path_str);
 		char* ret = (char*)malloc(base_dir_length + game_path_length + 1);
@@ -149,6 +149,8 @@ int TH_CDECL win32_utf8_main(int argc, const char *argv[])
 	char *cfg_exe_fn = NULL;
 	const char *final_exe_fn = NULL;
 	size_t run_cfg_fn_len = 0;
+	bool exe_path_is_trimmed = false;
+	const char* trimmed_exe_path = NULL;
 
 	// If thcrap just updated itself, finalize the update by moving things around if needed.
 	// This can be done before parsing the command line.
@@ -261,12 +263,45 @@ int TH_CDECL win32_utf8_main(int argc, const char *argv[])
 		goto end;
 	}
 
-	switch (GetExeBits(final_exe_fn)) {
+	// GetExeBits cannot handle arguments, so trim any args from
+	// the games.js entry before passing the string in.
+	// Try to be forgiving of bad formatting if possible.
+	trimmed_exe_path = final_exe_fn;
+	if (trimmed_exe_path[0] == '"') {
+		// Quoted exe path in games.js
+		if (const char* end_quote = strchr(trimmed_exe_path + 1, '"')) {
+			trimmed_exe_path = strdup_size(trimmed_exe_path + 1, PtrDiffStrlen(end_quote, trimmed_exe_path + 1));
+			exe_path_is_trimmed = true;
+		}
+	}
+	else {
+		for (
+			const char* exe_scan = trimmed_exe_path;
+			const char* extension_check = strchr(exe_scan, '.');
+			exe_scan = extension_check
+		) {
+		next_char:
+			switch (*++extension_check) {
+				default:
+					goto next_char;
+				case ' ':
+					trimmed_exe_path = strdup_size(trimmed_exe_path, PtrDiffStrlen(extension_check, trimmed_exe_path));
+					exe_path_is_trimmed = true;
+				case '\0':
+					goto break_extension_check;
+				case '/': case '\\':
+					break;
+			}
+		}
+	break_extension_check:;
+	}
+
+	switch (GetExeBits(trimmed_exe_path)) {
 		case -1: // Path does not exist
 			log_mboxf(NULL, MB_OK | MB_ICONEXCLAMATION,
 				"The target path does not exist.\n"
 				"\"%s\"\n"
-				, final_exe_fn
+				, trimmed_exe_path
 			);
 			ret = -7;
 			goto end;
@@ -274,17 +309,17 @@ int TH_CDECL win32_utf8_main(int argc, const char *argv[])
 			log_mboxf(NULL, MB_OK | MB_ICONEXCLAMATION,
 				"Could not identify architecture of target executable.\n"
 				"\"%s\"\n"
-				, final_exe_fn
+				, trimmed_exe_path
 			);
 			ret = -6;
 			goto end;
 		case ALT_ARCH_BITS: {
 #if !TH_X64
-			if unexpected(!OS_is_wow64()) {
+			if UNEXPECTED(!OS_is_wow64()) {
 				log_mboxf(NULL, MB_OK | MB_ICONEXCLAMATION,
 					"Cannot run a 64 bit executable on a 32 bit OS.\n"
 					"\"%s\"\n"
-					, final_exe_fn
+					, trimmed_exe_path
 				);
 				ret = -8;
 				goto end;
@@ -302,9 +337,10 @@ int TH_CDECL win32_utf8_main(int argc, const char *argv[])
 			BUILD_VLA_STR(wchar_t, new_args, L"bin/thcrap_loader" ALT_FILE_SUFFIX_W L".exe", L" ", args);
 			STARTUPINFOW si = {};
 			PROCESS_INFORMATION pi = {};
+			si.cb = sizeof(si);
 			BOOL success = CreateProcessW(L"bin/thcrap_loader" ALT_FILE_SUFFIX_W L".exe", new_args, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
 			VLA_FREE(new_args);
-			if unexpected(!success) {
+			if UNEXPECTED(!success) {
 				ret = -5;
 				goto end;
 			}
@@ -331,6 +367,9 @@ int TH_CDECL win32_utf8_main(int argc, const char *argv[])
 	ret = loader_update_with_UI_wrapper(final_exe_fn, cmdline);
 	free(cmdline);
 end:
+	if (exe_path_is_trimmed) {
+		free((void*)trimmed_exe_path);
+	}
 	json_decref(games_js);
 	json_decref(run_cfg);
 	runconfig_free();

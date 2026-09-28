@@ -103,7 +103,7 @@ void log_rotate(void)
 
 static void log_print_real(const char* str, uint32_t n, bool is_n) {
 	static DWORD byteRet;
-	if unexpected(console_open) {
+	if UNEXPECTED(console_open) {
 		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), str, n, &byteRet, NULL);
 	}
 	if (HANDLE file = log_file) {
@@ -567,7 +567,7 @@ void log_exit(void) {
 
 bool BP_log(x86_reg_t* regs, json_t* bp_info) {
 	const char* format = json_object_get_string(bp_info, "format");
-	if TH_UNLIKELY(!format) {
+	if UNEXPECTED(!format) {
 		return true;
 	}
 

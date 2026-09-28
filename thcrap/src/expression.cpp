@@ -104,7 +104,7 @@ struct CPUID_Data_t {
 		bool HasAVX2 = false;
 		bool FDP_EXCPTN_ONLY = false;
 		bool HasBMI2 = false;
-		bool HasERMS = false;
+		bool HasERMS = false; // enhanced REP MOVSB/REP STOSB
 		bool HasTSXRTM = false;
 		bool FCS_FDS_DEP = false;
 		bool HasMPX = false;
@@ -139,7 +139,7 @@ struct CPUID_Data_t {
 		bool HasMOVDIR64B = false;
 		bool HasAVX5124VNNIW = false;
 		bool HasAVX5124FMAPS = false;
-		bool HasFSRM = false;
+		bool HasFSRM = false; // fast short REP MOVSB
 		bool HasUINTR = false;
 		bool HasAVX512VP2I = false;
 		bool HasSERIALIZE = false;
@@ -155,11 +155,14 @@ struct CPUID_Data_t {
 		bool HasAVXVNNI = false;
 		bool HasAVX512BF16 = false;
 		bool HasCMPCCXADD = false;
-		bool HasFRMB0 = false;
-		bool HasFRSB = false;
-		bool HasFRCSB = false;
+		bool HasFRMB0 = false; // fast zero length REP MOVSB
+		bool HasFRSB = false; // fast short REP STOSB
+		bool HasFRCSB = false; // fast REP CMPSB
+		bool HasFRSCB = false; // fast REP SCASB
 		bool HasAMXFP16 = false;
 		bool HasAVXIFMA = false;
+		bool HasMOVRS = false;
+		bool HasACE = false;
 		bool HasAVXVNNIINT8 = false;
 		bool HasAVXNECONVERT = false;
 		bool HasAMXCOMPLEX = false;
@@ -168,6 +171,8 @@ struct CPUID_Data_t {
 		bool HasAPXF = false;
 		bool HasXSAVEOPT = false;
 		bool HasXSAVEC = false;
+		bool HasAVX101AUX = false;
+		bool HasAVX102AUX = false;
 		bool HasSYSCALL = false;
 		bool HasMMXEXT = false;
 		bool HasRDTSCP = false;
@@ -187,6 +192,7 @@ struct CPUID_Data_t {
 		bool HasRDPRU = false;
 		bool HasMCOMMIT = false;
 		bool HasLWPVAL = false;
+		bool HasAVX512BMM = false;
 		bool HasMVEX = false;
 	};
 	CPUID_Data_t(void) {
@@ -238,7 +244,7 @@ struct CPUID_Data_t {
 		const uint32_t& data2 = data[2]; // ECX
 		const uint32_t& data3 = data[3]; // EDX
 		switch (data[0]) {
-			default: //case 13:
+			default: // case 13:
 				__cpuidex(data, 13, 0);
 				xsave_mask_low = data[0];
 				xsave_mask_high = data[3];
@@ -283,6 +289,7 @@ struct CPUID_Data_t {
 				HasAVX512VNNI		= bittest32(data[2], 11);
 				HasAVX512BITALG		= bittest32(data[2], 12);
 				HasAVX512VPOPCNTDQ	= bittest32(data[2], 14);
+				// Fast zero memory? Is this is a STOS thing?
 				HasRDPID			= bittest32(data[2], 22);
 				HasCLDEMOTE			= bittest32(data[2], 25);
 				HasMOVDIRI			= bittest32(data[2], 27);
@@ -311,9 +318,11 @@ struct CPUID_Data_t {
 						HasCMPCCXADD	= bittest32(data[0], 7);
 						HasFRMB0		= bittest32(data[0], 10);
 						HasFRSB			= bittest32(data[0], 11);
-						HasFRCSB		= bittest32(data[0], 12);
+						HasFRCSB = HasFRSCB = bittest32(data[0], 12);
 						HasAMXFP16		= bittest32(data[0], 21);
 						HasAVXIFMA		= bittest32(data[0], 23);
+						HasMOVRS		= bittest32(data[0], 31);
+						HasACE			= bittest32(data[2], 11);
 						HasAVXVNNIINT8	= bittest32(data[3], 4);
 						HasAVXNECONVERT	= bittest32(data[3], 5);
 						HasAMXCOMPLEX	= bittest32(data[3], 8);
@@ -326,12 +335,15 @@ struct CPUID_Data_t {
 							vector_width = bittest32(data[2], 18) ? VECW_512 :
 										   bittest32(data[2], 17) ? VECW_256 :
 										   VECW_128;
+							__cpuidex(data, 36, 1);
+							HasAVX101AUX = bittest32(data[2], 2);
+							HasAVX102AUX = bittest32(data[2], 3);
 						}
 					case 0:;
 				}
 			case 6: case 5: case 4: case 3: case 2:
 				__cpuid(data, 0x20000000);
-				if unexpected(data[0] > 0) {
+				if UNEXPECTED(data[0] > 0) {
 					__cpuid(data, 0x20000001);
 					HasMVEX = bittest32(data[3], 4);
 				}
@@ -342,6 +354,10 @@ struct CPUID_Data_t {
 							__cpuid(data, 0x80000021);
 							HasFRSB			|= bittest32(data[0], 10);
 							HasFRCSB		|= bittest32(data[0], 11);
+							HasERMS			|= bittest32(data[0], 15);
+							HasFRSCB		|= bittest32(data[0], 19);
+							HasPREFETCHI	|= bittest32(data[0], 21);
+							HasAVX512BMM	|= bittest32(data[0], 23);
 						case 0x80000020: case 0x8000001F: case 0x8000001E: case 0x8000001D: case 0x8000001C:
 							__cpuid(data, 0x8000001C);
 							HasLWPVAL		= bittest32(data[0], 1);
@@ -401,7 +417,7 @@ struct CPUID_Data_t {
 
 				// Fast system call/return compatibility table.
 				// This isn't really *important* to anything that thcrap does,
-				// but the shear inconsistency of it is laughable enough to document.
+				// but the sheer inconsistency of it is laughable enough to document.
 				//          | Legacy Modes                            | Long Modes
 				//          | Real Mode | v8086 Mode | Protected Mode | Compatibility Mode | 64 Bit Mode
 				// SYSENTER |           | Intel, AMD | Intel, AMD     | Intel              | Intel
@@ -1220,7 +1236,7 @@ static size_t ApplyOperator(const size_t value, const size_t arg, const op_t op)
 static inline const patch_val_t* GetOptionValue(const char* name, size_t name_length) {
 	ExpressionLogging("Option: \"%.*s\"\n", name_length, name);
 	const patch_val_t* const option = patch_opt_get_len(name, name_length);
-	if unexpected(!option) {
+	if UNEXPECTED(!option) {
 		OptionNotFoundErrorMessage(name, name_length);
 	}
 	return option;
@@ -1285,6 +1301,9 @@ static TH_NOINLINE size_t GetCPUFeatureTest(const char* name, size_t name_length
 			else if (strnicmp(name, "prefetchw", name_length) == 0) return CPUID_Data.HasPREFETCHW;
 			else if (strnicmp(name, "prefetchi", name_length) == 0) return CPUID_Data.HasPREFETCHI;
 			else if (strnicmp(name, "serialize", name_length) == 0) return CPUID_Data.HasSERIALIZE;
+			else if (strnicmp(name, "avx512bmm", name_length) == 0) return CPUID_Data.HasAVX512BMM;
+			else if (strnicmp(name, "avx101aux", name_length) == 0) return CPUID_Data.HasAVX101AUX;
+			else if (strnicmp(name, "avx102aux", name_length) == 0) return CPUID_Data.HasAVX102AUX;
 			else	goto InvalidCPUFeatureError;
 			break;
 		case 8:
@@ -1349,9 +1368,11 @@ static TH_NOINLINE size_t GetCPUFeatureTest(const char* name, size_t name_length
 			else if (strnicmp(name, "xsave", name_length) == 0) return CPUID_Data.HasXSAVE;
 			else if (strnicmp(name, "shstk", name_length) == 0) return CPUID_Data.HasSHSTK;
 			else if (strnicmp(name, "model", name_length) == 0) return CPUID_Data.FamilyData.raw;
+			else if (strnicmp(name, "movrs", name_length) == 0) return CPUID_Data.HasMOVRS;
 			else if (strnicmp(name, "3dnow", name_length) == 0) return CPUID_Data.Has3DNOW;
-			else if (strnicmp(name, "frmb0", name_length) == 0) return CPUID_Data.HasFRMB0;
-			else if (strnicmp(name, "frcsb", name_length) == 0) return CPUID_Data.HasFRCSB;
+			else if (strnicmp(name, "frmb0", name_length) == 0) return CPUID_Data.HasFRMB0; // fast zero length REP MOVSB
+			else if (strnicmp(name, "frcsb", name_length) == 0) return CPUID_Data.HasFRCSB; // fast REP CMPSB
+			else if (strnicmp(name, "frscb", name_length) == 0) return CPUID_Data.HasFRSCB; // fast REP SCASB
 #if !TH_X64
 			else if (strnicmp(name, "win64", name_length) == 0) return CPUID_Data.OSIsWow64;
 #else
@@ -1375,9 +1396,9 @@ static TH_NOINLINE size_t GetCPUFeatureTest(const char* name, size_t name_length
 			else if (strnicmp(name, "sse2", name_length) == 0) return CPUID_Data.HasSSE2;
 			else if (strnicmp(name, "f16c", name_length) == 0) return CPUID_Data.HasF16C;
 			else if (strnicmp(name, "gfni", name_length) == 0) return CPUID_Data.HasGFNI;
-			else if (strnicmp(name, "erms", name_length) == 0) return CPUID_Data.HasERMS;
-			else if (strnicmp(name, "fsrm", name_length) == 0) return CPUID_Data.HasFSRM;
-			else if (strnicmp(name, "frsb", name_length) == 0) return CPUID_Data.HasFRSB;
+			else if (strnicmp(name, "erms", name_length) == 0) return CPUID_Data.HasERMS; // enhanced REP MOVSB/REP STOSB
+			else if (strnicmp(name, "fsrm", name_length) == 0) return CPUID_Data.HasFSRM; // fast short REP MOVSB
+			else if (strnicmp(name, "frsb", name_length) == 0) return CPUID_Data.HasFRSB; // fast short REP STOSB
 			else if (strnicmp(name, "clwb", name_length) == 0) return CPUID_Data.HasCLWB;
 			else if (strnicmp(name, "mvex", name_length) == 0) return CPUID_Data.HasMVEX;
 			// A build compiled without SSE could theoretically run on PC98 hardware, so why not?
@@ -1398,6 +1419,7 @@ static TH_NOINLINE size_t GetCPUFeatureTest(const char* name, size_t name_length
 			else if (strnicmp(name, "abm", name_length) == 0) return CPUID_Data.HasABM;
 			else if (strnicmp(name, "xop", name_length) == 0) return CPUID_Data.HasXOP;
 			else if (strnicmp(name, "tbm", name_length) == 0) return CPUID_Data.HasTBM;
+			else if (strnicmp(name, "ace", name_length) == 0) return CPUID_Data.HasACE;
 			else if (strnicmp(name, "sse", name_length) == 0) return CPUID_Data.HasSSE;
 			else if (strnicmp(name, "mmx", name_length) == 0) return CPUID_Data.HasMMX;
 			else if (strnicmp(name, "sm3", name_length) == 0) return CPUID_Data.HasSM3;
@@ -1435,7 +1457,7 @@ static uintptr_t GetCodecaveAddress(const char *const name, const size_t name_le
 			switch ((bool)(user_offset_expr == user_offset_expr_next)) {
 				case true: {
 					// If a hex value doesn't work, try a subexpression
-					if unexpected(!eval_expr_impl(user_offset_expr, is_relative ? ']' : '>', &user_offset_value, StartNoOp, 0, data_refs)) {
+					if UNEXPECTED(!eval_expr_impl(user_offset_expr, is_relative ? ']' : '>', &user_offset_value, StartNoOp, 0, data_refs)) {
 						ExpressionErrorMessage();
 						break;
 					}
@@ -1457,7 +1479,7 @@ static uintptr_t GetBPFuncOrRawAddress(const char *const name, const size_t name
 	uintptr_t addr = func_get_len(name, name_length);
 	switch (addr) {
 		case 0: {// Will be null if the name was not a BP function
-			if unexpected(!eval_expr_impl(name, is_relative ? ']' : '>', &addr, StartNoOp, 0, data_refs)) {
+			if UNEXPECTED(!eval_expr_impl(name, is_relative ? ']' : '>', &addr, StartNoOp, 0, data_refs)) {
 				ExpressionErrorMessage();
 				break;
 			}
@@ -1570,7 +1592,7 @@ static TH_NOINLINE const char* get_patch_value_impl(const char* expr, patch_val_
 	ExpressionLogging("Patch value opening char: \"%hhX\"\n", expr[0]);
 	const char* patch_val_end = find_matching_end(expr, expr[0] == '[' ? TextInt('[', ']') : TextInt('<', '>'));
 	ExpressionLogging("Patch value end: \"%s\"\n", patch_val_end ? patch_val_end : "NULL");
-	if unexpected(!patch_val_end) {
+	if UNEXPECTED(!patch_val_end) {
 		//Bracket error
 		return NULL;
 	}
@@ -1978,7 +2000,7 @@ static const char* consume_value_impl(const char* expr, size_t *const out, const
 			// Unary Operators
 			case '!': case '~': case '+': case '-': {
 				expr_next = consume_value_impl(expr + 1 + (expr[0] == expr[1]), out, data_refs);
-				if unexpected(!expr_next) goto InvalidValueError;
+				if UNEXPECTED(!expr_next) goto InvalidValueError;
 				switch ((uint8_t)expr[0] << (uint8_t)(expr[0] == expr[1])) {
 					case '~': *out = ~*out; break;
 					case '!': *out = !*out; break;
@@ -1995,7 +2017,7 @@ static const char* consume_value_impl(const char* expr, size_t *const out, const
 			case '*': {
 				// expr + 1 is used to avoid creating a loop
 				expr_next = consume_value_impl(expr + 1, out, data_refs);
-				if unexpected(!expr_next) goto InvalidValueError;
+				if UNEXPECTED(!expr_next) goto InvalidValueError;
 				goto SharedDeref;
 			}
 			// Casts and subexpression values
@@ -2015,7 +2037,7 @@ static const char* consume_value_impl(const char* expr, size_t *const out, const
 					*/
 					// Casts
 					expr_next = consume_value_impl(expr_next, out, data_refs);
-					if unexpected(!expr_next) goto InvalidValueError;
+					if UNEXPECTED(!expr_next) goto InvalidValueError;
 					++expr_next;
 					if (cur_value.type != PVT_DEFAULT) {
 						switch (cur_value.type) {
@@ -2041,7 +2063,7 @@ static const char* consume_value_impl(const char* expr, size_t *const out, const
 				else {
 					// Subexpressions
 					expr_next = eval_expr_impl(expr, ')', out, StartNoOp, 0, data_refs);
-					if unexpected(!expr_next) goto InvalidExpressionError;
+					if UNEXPECTED(!expr_next) goto InvalidExpressionError;
 					++expr_next;
 				}
 				goto PostfixCheck;
@@ -2052,10 +2074,10 @@ static const char* consume_value_impl(const char* expr, size_t *const out, const
 					// Dereference
 					// expr + 1 is used to avoid creating a loop
 					expr_next = eval_expr_impl(expr + 1, ']', out, StartNoOp, 0, data_refs);
-					if unexpected(!expr_next) goto InvalidExpressionError;
+					if UNEXPECTED(!expr_next) goto InvalidExpressionError;
 					++expr_next;
 			SharedDeref:
-					if unexpected(!*out) goto NullDerefWarning;
+					if UNEXPECTED(!*out) goto NullDerefWarning;
 					if (cur_value.type == PVT_DEFAULT) {
 						*out = *(size_t*)*out;
 					}
@@ -2092,7 +2114,7 @@ static const char* consume_value_impl(const char* expr, size_t *const out, const
 			case '<': {
 				// DON'T use expr + 1 since that kills get_patch_value
 				expr_next = get_patch_value_impl(expr, &cur_value, data_refs);
-				if unexpected(!expr_next) goto PatchValueBracketError;
+				if UNEXPECTED(!expr_next) goto PatchValueBracketError;
 				switch (cur_value.type) {
 					case PVT_BYTE: *out = (size_t)cur_value.b; break;
 					case PVT_SBYTE: *out = (size_t)cur_value.sb; break;
@@ -2201,7 +2223,7 @@ static const char* eval_expr_impl(const char* expr, char end, size_t *const out,
 
 		if (ops_cur != NullOp) {
 			const char* expr_next_val = consume_value_impl(expr, &cur_value, data_refs);
-			if unexpected(!expr_next_val) goto InvalidValueError;
+			if UNEXPECTED(!expr_next_val) goto InvalidValueError;
 			expr = expr_next_val;
 		}
 
@@ -2224,7 +2246,7 @@ static const char* eval_expr_impl(const char* expr, char end, size_t *const out,
 				switch (ops_next) {
 					default:
 						expr = eval_expr_impl(expr, end, &cur_value, ops_next, cur_value, data_refs);
-						if unexpected(!expr) goto InvalidExpressionError;
+						if UNEXPECTED(!expr) goto InvalidExpressionError;
 						ExpressionLogging(
 							"\tRETURN FROM SUBEXPRESSION\n"
 							"\tRemaining: \"%s\"\n",
@@ -2239,11 +2261,11 @@ static const char* eval_expr_impl(const char* expr, char end, size_t *const out,
 								ExpressionLogging("Ternary TRUE compare: \"%s\"\n", expr);
 								if (expr[0] != ':') {
 									expr = eval_expr_impl(expr, ':', &cur_value, StartNoOp, 0, data_refs);
-									if unexpected(!expr) goto InvalidExpressionError;
+									if UNEXPECTED(!expr) goto InvalidExpressionError;
 								}
 								ExpressionLogging("Skipping value until %hhX in \"%s\"...\n", end, expr);
 								expr = skip_value(expr, end);
-								if unexpected(!expr) goto InvalidExpressionError;
+								if UNEXPECTED(!expr) goto InvalidExpressionError;
 								ExpressionLogging(
 									"Skipping completed\n"
 									"Ternary TRUE remaining: \"%s\" with end \"%hhX\"\n",
@@ -2259,7 +2281,7 @@ static const char* eval_expr_impl(const char* expr, char end, size_t *const out,
 								DisableCodecaveNotFound = true;
 								expr = eval_expr_impl(expr, ':', &dummy_cur_value, StartNoOp, 0, data_refs);
 								DisableCodecaveNotFound = false;
-								if unexpected(!expr) goto InvalidExpressionError;
+								if UNEXPECTED(!expr) goto InvalidExpressionError;
 								while (*expr++ != ':');
 								ExpressionLogging(
 									"Skipping completed\n"
@@ -2286,17 +2308,17 @@ static const char* eval_expr_impl(const char* expr, char end, size_t *const out,
 				// is pretty terrible for a recursive function. Screw that.
 				if ((uint8_t)(cur_prec - OpData.Precedence[Assign]) <= (OpData.Precedence[TernaryConditional] - OpData.Precedence[Assign])) {
 					expr = eval_expr_impl(expr, end, &cur_value, ops_next, cur_value, data_refs);
-					if unexpected(!expr) goto InvalidExpressionError;
+					if UNEXPECTED(!expr) goto InvalidExpressionError;
 				}
 				/*switch (cur_prec) {
 					case OpData.Precedence[TernaryConditional]:
 					case OpData.Precedence[Assign]:
 						expr = eval_expr_impl(expr, end, &cur_value, ops_next, cur_value, data_refs);
-						if unexpected(!expr) goto InvalidExpressionError;
+						if UNEXPECTED(!expr) goto InvalidExpressionError;
 				}*/
 				/*if (OpData.Associativity[ops_cur] == RightAssociative) {
 					expr = eval_expr_impl(expr, end, &cur_value, ops_next, cur_value, data_refs);
-					if unexpected(!expr) goto InvalidExpressionError;
+					if UNEXPECTED(!expr) goto InvalidExpressionError;
 				}*/
 				break;
 			case HigherThanNext:
